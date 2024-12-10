@@ -5,6 +5,8 @@ def process_and_count_nodes(file1_path, file2_path, output_path):
         inside_node_block = False
         for line in file1:
             line = line.strip()
+            if line.startswith("$"):  # 跳过以 $ 开头的行
+                continue
             if line.startswith("*NODE"):
                 inside_node_block = True
                 continue
@@ -26,6 +28,8 @@ def process_and_count_nodes(file1_path, file2_path, output_path):
     with open(file2_path, 'r') as file2, open(output_path, 'w') as output_file:
         inside_node_block = False
         for line in file2:
+            if line.startswith("$"):  # 跳过以 $ 开头的行
+                continue
             if line.startswith("*NODE"):
                 inside_node_block = True
                 output_file.write(line)
