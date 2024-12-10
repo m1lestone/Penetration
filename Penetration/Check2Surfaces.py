@@ -251,6 +251,73 @@ def PenetrationAddID(ID, Penetration):
         Penetration_ID[node_id] = Penetration[i]
     return Penetration_ID
 
+def Plot2Surface_Penetration(quadrilaterals, Elem_surf, Penetration_ID, penetration_values,quadrilaterals2):
+    """
+    根据穿透值绘制表面四边形，并根据穿透值为每个点着色。
+    
+    参数：
+        quadrilaterals: List[List[np.array]], 每个四边形的顶点坐标，形状 (n, 4, 3)
+        penetration_values: List[float], 每个四边形的穿透值，与 quadrilaterals 顺序对应
+    """
+    # 创建一个新的三维图
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # 初始化坐标的最大最小值
+    x_min, y_min, z_min = 0, 0, 0
+    x_max, y_max, z_max = 0, 0, 0
+    
+    # 标准化穿透值用于颜色映射
+    norm = Normalize(vmin=min(penetration_values), vmax=max(penetration_values))
+    cmap = plt.colormaps['coolwarm']  # 使用 coolwarm 颜色映射（蓝-白-红）
+    for quad in quadrilaterals2:
+
+        quad = np.array(quad)
+        x, y, z = quad[:, 0], quad[:, 1], quad[:, 2]
+        # 更新最大最小值
+        x_min, x_max = min(x_min, np.min(x)), max(x_max, np.max(x))
+        y_min, y_max = min(y_min, np.min(y)), max(y_max, np.max(y))
+        z_min, z_max = min(z_min, np.min(z)), max(z_max, np.max(z))
+        
+        # 保证闭合四边形
+        verts = [[(x[i], y[i], z[i]) for i in range(4)]]        
+        # 添加四边形到图中
+        ax.add_collection3d(Poly3DCollection(verts, facecolors='white', linewidths=1, edgecolors='b', alpha=0.25))  
+
+    # 遍历每个四边形并绘制
+    for quad, element in zip(quadrilaterals, Elem_surf):
+        quad = np.array(quad)
+        x, y, z = quad[:, 0], quad[:, 1], quad[:, 2]
+        n = [element[2], element[3], element[4], element[5]]
+        # 更新最大最小值
+        x_min, x_max = min(x_min, np.min(x)), max(x_max, np.max(x))
+        y_min, y_max = min(y_min, np.min(y)), max(y_max, np.max(y))
+        z_min, z_max = min(z_min, np.min(z)), max(z_max, np.max(z))
+        
+        # 计算穿透值
+        penetration = np.mean([Penetration_ID[node_id] for node_id in n])
+        
+        # 定义颜色
+        color = cmap(norm(penetration))
+        
+        # 保证闭合四边形
+        verts = [[(x[i], y[i], z[i]) for i in range(4)]]
+        # 添加四边形到图中
+        ax.add_collection3d(Poly3DCollection(verts, facecolors=color, linewidths=1, edgecolors='k', alpha=0.8))  
+
+    # 设置坐标范围
+    ax.set_xlim([x_min, x_max])
+    ax.set_ylim([y_min, y_max])
+    ax.set_zlim([z_min, z_max])
+    
+    # 添加颜色条
+    sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    fig.colorbar(sm, ax=ax, orientation='vertical', label='Penetration Value')
+
+    # 显示图形
+    plt.show()
+
 def PlotSurface_Penetration(quadrilaterals, Elem_surf, Penetration_ID, penetration_values):
     """
     根据穿透值绘制表面四边形，并根据穿透值为每个点着色。
@@ -315,13 +382,39 @@ surfA = Get_Surface_Nodes(target_folder, SurfA_Name, Cordinate, FileType_csv)
 surfB = Get_Surface_Nodes(target_folder, SurfB_Name, Cordinate, FileType_csv)
 Elem_surfA = Get_Shell_elem(target_folder,SurfA_Name+FileType_k)
 Elem_surfB = Get_Shell_elem(target_folder,SurfB_Name+FileType_k)
-Time_step = 200
+
+def LoopMaxPenetration(surfa, surfb, elem_surfb):
+    max_penetration = 0.0  # 初始化最大渗透值
+    max_time_step = 0      # 初始化对应时间步
+    num_time_steps = surfa[0].shape[0]  # 假设 surfa[0] 的行数代表时间步数
+
+    for Time_step in range(num_time_steps):
+        # 计算 B 表面的法向量
+        surfB_nodes_normal, surfB_elems_normal = compute_node_normals(surfb, elem_surfb, Time_step)
+        
+        # 计算渗透值
+        surfA_Penetration = calculate_gap_or_penetration(surfa, surfb, Time_step, surfB_nodes_normal, gap=0.0)
+        
+        # 计算当前时间步的最大绝对值渗透
+        current_max_penetration = np.max(np.abs(surfA_Penetration))
+        
+        # 如果当前渗透值大于记录的最大值，更新最大值和时间步
+        if current_max_penetration > max_penetration:
+            max_penetration = current_max_penetration
+            Penetration = surfA_Penetration
+            max_time_step = Time_step
+        
+        print(Time_step,'/',num_time_steps,':',max_time_step,max_penetration)
+
+    return max_time_step, Penetration
+
+
+Time_step,surfA_Penetration = LoopMaxPenetration(surfA, surfB,Elem_surfB)
 surfA_ToPlot = AssembeShell(surfA,Elem_surfA,Time_step)
 surfB_ToPlot = AssembeShell(surfB,Elem_surfB,Time_step)
-surfB_nodes_normal, surfB_elems_normal = compute_node_normals(surfB,Elem_surfB,Time_step)
-surfA_Penetration = calculate_gap_or_penetration(surfA, surfB, Time_step, surfB_nodes_normal, gap=0.0)
 
 # 调用修改后的函数
 surfA_Penetration_id = PenetrationAddID(surfA[0].columns, surfA_Penetration)
-PlotSurface_Penetration(surfA_ToPlot, Elem_surfA, surfA_Penetration_id, surfA_Penetration)
+Plot2Surface_Penetration(surfA_ToPlot, Elem_surfA, surfA_Penetration_id, surfA_Penetration,surfB_ToPlot)
+# PlotSurface_Penetration(surfA_ToPlot, Elem_surfA, surfA_Penetration_id, surfA_Penetration)
 
