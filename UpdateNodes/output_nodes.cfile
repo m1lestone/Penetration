@@ -1,0 +1,6 @@
+bgstyle plain
+open d3plot "\\192.168.83.16\Proj2\ChengbinLi\FFI\FirstRoundReconstruction\case2203180171\case2203180171_positioning\FFI_case2203180171_positioning_1stv4\d3plot"
+Reading binary plot files
+Finished reading model
+ac
+output "output_nodes" 32 1 1 1 0 1 0 0 0 0 0 0 0 0 0 1.000000 0 0
