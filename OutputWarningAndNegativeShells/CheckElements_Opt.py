@@ -2,103 +2,132 @@ import os
 import re
 import numpy as np
 
-# 定义文件前缀和正则模式
-file_prefix = "mes"
-warpage_angle_pattern = r"warpage angle of element ID= (\d+) is computed as ([\d\.E\+\-]+) degrees"
-shell_failure_pattern = r"^\s*shell element (\d+)\s+failed at time\s+([\d\.E\+\-]+)"
-node_deletion_pattern = r"^\s*node\s+number (\d+)\s+deleted at time\s+([\d\.E\+\-]+)"
-
-# 存储提取结果
-warpage_angle = []
-shell_failures = []
-node_deletions = []
-
-# 获取当前文件夹中的所有文件
-current_dir = os.getcwd()
-files = [f for f in os.listdir(current_dir) if f.startswith(file_prefix)]
-
-# 遍历所有符合条件的文件
-for file_name in files:
-    with open(file_name, 'r') as file:
+def process_and_count_failure_elements(file_path, element_list, part_failure_elements):
+    """
+    从 .k 文件中提取与给定 element_list 匹配的 pid 和 eid 信息。
+    
+    参数:
+    - file_path: .k 文件路径。
+    - element_list: 要匹配的 element_id 列表。
+    - part_failure_elements: 记录 pid 与其对应 eid 列表的字典。
+    
+    返回:
+    - part_failure_elements: 更新后的字典。
+    """
+    with open(file_path, 'r') as file:
+        inside_element_block = False
         for line in file:
-            # 匹配警告信息
-            warpage_angle_match = re.search(warpage_angle_pattern, line)
-            if warpage_angle_match:
-                element_id = warpage_angle_match.group(1)
-                angle = warpage_angle_match.group(2)
-                warpage_angle.append((element_id, angle))
-            
-            # 匹配 shell element failure
-            shell_failures_match = re.search(shell_failure_pattern, line)
-            if shell_failures_match:
-                element_id = shell_failures_match.group(1)
-                time_failed = shell_failures_match.group(2)
-                shell_failures.append((element_id, time_failed))
-            
-            # 匹配 node deletion
-            node_deletions_match = re.search(node_deletion_pattern, line)
-            if node_deletions_match:
-                node_number = node_deletions_match.group(1)
-                time_deleted = node_deletions_match.group(2)
-                node_deletions.append((node_number, time_deleted))
-
-# 将提取的结果转换为 NumPy 数组
-warpage_angle_np = np.array(warpage_angle)
-shell_failures_np = np.array(shell_failures)
-node_deletions_np = np.array(node_deletions)
-
-# 将字符串数组的第一列转换为 float 类型，并四舍五入
-warpage_angle_float = warpage_angle_np[:, 0].astype(float)
-shell_failures_float = shell_failures_np[:, 0].astype(float)
-warpage_angle_int = np.round(warpage_angle_float).astype(int)
-shell_failures_int = np.round(shell_failures_float).astype(int)
-
-def process_and_count_Failure_Elements(file1_path, element_list, Part_FailureElements):
-    with open(file1_path, 'r') as file1:
-        inside_node_block = False
-        for line in file1:
             line = line.strip()
-            if line.startswith("$"):  # 跳过以 $ 开头的行
+            if line.startswith("$"):  # 跳过注释行
                 continue
-            if line.startswith("*"):  # 跳过以 * 开头的行
-                if line.startswith("*ELEMENT"):
-                    inside_node_block = True
-                else:
-                    inside_node_block = False
-                continue          
-            if inside_node_block:
+            if line.startswith("*"):  # 检查块的开始和结束
+                inside_element_block = line.startswith("*ELEMENT")
+                continue
+            if inside_element_block:
                 try:
-                    eid = int(line[:8].strip())  # 提取前 8 位的 eid
-                    pid = int(line[8:16].strip())  # 提取 8-16 位的 pid                    
+                    eid = int(line[:8].strip())
+                    pid = int(line[8:16].strip())
                 except ValueError:
-                    continue  # 跳过无法转换为整数的行
+                    continue  # 忽略无效行
+                if eid in element_list:  # 如果 eid 在给定列表中
+                    part_failure_elements.setdefault(pid, []).append(eid)
+    return part_failure_elements
 
-                if eid in element_list:  # 如果 eid 在给定的 element_list 中
-                    # 如果 pid 不在字典中，初始化一个空列表
-                    if pid not in Part_FailureElements:
-                        Part_FailureElements[pid] = []
-                    # 向 pid 对应的列表中添加 eid
-                    Part_FailureElements[pid].append(eid)
+def search_message_files(file_prefix, patterns):
+    """
+    搜索符合特定正则模式的日志文件并提取数据。
+    
+    参数:
+    - file_prefix: 文件名前缀，用于筛选文件。
+    - patterns: 字典，键为模式名称，值为正则表达式字符串。
+    
+    返回:
+    - results: 包含每个模式匹配结果的字典，键为模式名称，值为 NumPy 数组。
+    """
+    # 编译正则表达式
+    compiled_patterns = {key: re.compile(pattern) for key, pattern in patterns.items()}
+    results = {key: [] for key in compiled_patterns}
 
-    return Part_FailureElements
+    # 遍历当前目录中的所有符合前缀的文件
+    current_dir = os.getcwd()
+    for file_name in os.listdir(current_dir):
+        if file_name.startswith(file_prefix):
+            try:
+                with open(file_name, 'r') as file:
+                    for line in file:
+                        for key, pattern in compiled_patterns.items():
+                            match = pattern.search(line)
+                            if match:
+                                results[key].append(match.groups())
+            except Exception as e:
+                print(f"Error reading file {file_name}: {e}")
+    
+    # 将匹配结果转换为 NumPy 数组
+    for key in results:
+        results[key] = np.array(results[key])
+    return results
 
-# 指定文件夹路径
+def convert_numpy_chart_int(input_numpy):
+    """
+    将每个正则模式匹配结果的第一个列转换为整型。
+    
+    参数:
+    - input_numpy: 包含 NumPy 数组的字典。
+    
+    返回:
+    - results: 转换为整型的字典。
+    """
+    results = {}
+    for key, array in input_numpy.items():
+        if array.size > 0:  # 确保数组非空
+            results[key] = np.round(array[:, 0].astype(float)).astype(int)
+    return results
+
+def check_failure_pid(folder_path, filetype, input_numpy):
+    """
+    检查文件夹中的所有 .k 文件，根据输入的 element_id 列表统计 pid 对应的失败元素。
+    
+    参数:
+    - folder_path: 包含 .k 文件的文件夹路径。
+    - filetype: 要筛选的文件类型（例如 ".k"）。
+    - input_numpy: 包含 element_id 列表的字典。
+    
+    返回:
+    - results: 包含每个 pid 及其失败元素的字典。
+    """
+    results = {key: {} for key in input_numpy.keys()}  # 初始化结果字典
+
+    # 遍历文件夹及其子文件夹
+    for root, dirs, files in os.walk(folder_path):
+        for file in files:
+            if file.endswith(filetype):  # 筛选特定类型的文件
+                file_path = os.path.join(root, file)
+                for key, element_list in input_numpy.items():
+                    results[key] = process_and_count_failure_elements(file_path, element_list, results[key])
+                print(f"Checked .k file: {file_path}")
+    return results
+
+# 定义日志文件正则模式
+patterns = {
+    "warpage_angle": r"^\s*warpage angle of element ID= (\d+) is computed as ([\d\.E\+\-]+) degrees",
+    "shell_failures": r"^\s*shell element (\d+)\s+failed at time\s+([\d\.E\+\-]+)",
+    "node_deletions": r"^\s*node\s+number (\d+)\s+deleted at time\s+([\d\.E\+\-]+)",
+    "solid_negative": r"^\s*negative volume in solid element # (\d+) cycle (\d+)"
+}
+
+# 1. 提取日志文件信息
+file_prefix = "mes"
+results = search_message_files(file_prefix, patterns)
+
+# 2. 转换提取结果为整型
+results_int = convert_numpy_chart_int(results)
+
+# 3. 检查 .k 文件中 pid 和 eid 的对应关系
 folder_path = "00_INCLUDE"
-Part_shell_failures = {}
-Part_warpage_angle = {}
+filetype_k = ".k"
+Part_failure = check_failure_pid(folder_path, filetype_k, results_int)
 
-# 遍历文件夹及其子文件夹，获取所有 .k 文件
-for root, dirs, files in os.walk(folder_path):
-    for file in files:
-        if file.endswith(".k"):  # 过滤所有 .k 文件
-            file_path = os.path.join(root, file)
-            Part_warpage_angle = process_and_count_Failure_Elements(file_path, warpage_angle_int, Part_warpage_angle)            
-            Part_shell_failures = process_and_count_Failure_Elements(file_path, shell_failures_int, Part_shell_failures)            
-            print(f"Check .k file: {file_path}")
-
-# 输出提取结果
-print("Warpage Angle Element :")
-print(list(Part_warpage_angle.keys()))
-
-print("Shell Element Failures:")
-print(list(Part_shell_failures.keys()))
+# 4. 输出结果
+print("Part Failure Elements:")
+for key, failures in Part_failure.items():
+    print(f"Pattern: {key}, Failures: {failures.keys()}")
